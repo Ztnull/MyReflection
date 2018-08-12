@@ -55,6 +55,10 @@
     </None>
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\ClassLibrary1\Model.csproj">
+      <Project>{8f71db02-cedd-459d-9c66-fc6c6def5e86}</Project>
+      <Name>Model</Name>
+    </ProjectReference>
     <ProjectReference Include="..\DB.Interface\DB.Interface.csproj">
       <Project>{7dc87cc9-e334-4fa4-8641-200858242d0c}</Project>
       <Name>DB.Interface</Name>
