@@ -4,6 +4,7 @@ using System.Configuration;
 using System.Data;
 using System.Data.SqlClient;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Text;
 using System.Threading.Tasks;
 using DB.Interface;
@@ -63,23 +64,16 @@ namespace DB.SqlServer
 
         #region 最牛逼的yield+IEnumerable<T>封装
 
-        #region  根据传入的条件执行Sql语句，并返回一个IEnumerable<T>类型的集合
+        #region 传入Sql语句执行查询，返回一个强类型的IEnumerable集合+（注意：主要用于多表连接查询）
         /// <summary>
-        /// 根据传入的条件执行Sql语句，并返回一个IEnumerable<T>类型的集合
-        /// （注意传入的 T 必须约束为 where T : class, new()）
+        /// 传入Sql语句执行查询，返回一个强类型的IEnumerable集合
+        /// （注意：主要用于多表连接查询）
         /// </summary>
-        /// <typeparam name="T">类型：【 约束为 where T : class, new() 】</typeparam>
-        /// <param name="where">查询的条件，请省略 Where 关键字</param>
-        /// <returns></returns>
-        public IEnumerable<T> GetList<T>(string where)
+        /// <typeparam name="T">传入的类型</typeparam>
+        /// <param name="sql">sql语句</param>
+        /// <returns>返回的IEnumerable<T> 集合</returns>
+        public IEnumerable<T> GetList<T>(string sql) where T : new()
         {
-            Type type = typeof(T);
-            //遍历获得字段
-            string columnString = string.Join(",", type.GetProperties().Select(p => string.Format("[{0}]", p.Name)));
-            string sql = string.Format("SELECT {0} FROM [{1}] WHere {2} ",
-                columnString,
-                type.Name,
-                where);
             using (SqlDataReader reader = ExecuteReader(sql))
             {
                 if (reader.HasRows)
@@ -93,6 +87,40 @@ namespace DB.SqlServer
         }
         #endregion
 
+        #region  根据传入的条件执行Sql语句，并返回一个IEnumerable<T>类型的集合
+
+        /// <summary>
+        /// 根据传入的条件执行Sql语句，并返回一个IEnumerable<T>类型的集合
+        /// （注意传入的 T 必须约束为 where T : class, new()）
+        /// </summary>
+        /// <typeparam name="T">类型：【 约束为 where T : class, new() 】</typeparam>
+        /// <param name="where">查询的条件，请省略 Where 关键字</param>
+        /// <returns></returns>
+        public IEnumerable<T> GetList<T>(Expression<Func<T, bool>> where) where T : new()
+        {
+            Type type = typeof(T);
+            //遍历获得字段
+            string columnString = string.Join(",", type.GetProperties().Select(p => string.Format("[{0}]", p.Name)));
+            string sql = string.Format("SELECT {0} FROM [{1}] Where  {2} ",
+                columnString,
+                type.Name,
+                DealExpress(where));
+
+            //return GetList<T>(sql);
+            using (SqlDataReader reader = ExecuteReader(sql))
+            {
+                if (reader.HasRows)
+                {
+                    while (reader.Read())
+                    {
+                        yield return MapEntity<T>(reader);
+                    }
+                }
+            }
+        }
+        #endregion
+
+        #region Common static+公共的调用查询方法 返回 DataReader + T
         #region ExecuteReader +static SqlDataReader ExecuteReader(string cmdText, params SqlParameter[] parameters)
         /// <summary>
         /// 执行一个查询的T-SQL语句, 返回一个SqlDataReader对象, 如果出现SQL语句执行错误, 将会关闭连接通道抛出异常
@@ -187,8 +215,114 @@ namespace DB.SqlServer
                 return default(T);
             }
         }
+        #endregion 
+        #endregion 
+
+        #region 表达式树的解析
+
+        public static string DealExpress(Expression exp)
+        {
+            if (exp is LambdaExpression)
+            {
+                LambdaExpression l_exp = exp as LambdaExpression;
+                return DealExpress(l_exp.Body);
+            }
+            if (exp is BinaryExpression)
+            {
+                return DealBinaryExpression(exp as BinaryExpression);
+            }
+            if (exp is MemberExpression)
+            {
+                return DealMemberExpression(exp as MemberExpression);
+            }
+            if (exp is ConstantExpression)
+            {
+                return DealConstantExpression(exp as ConstantExpression);
+            }
+            if (exp is UnaryExpression)
+            {
+                return DealUnaryExpression(exp as UnaryExpression);
+            }
+
+            return "";
+        }
+        public static string DealUnaryExpression(UnaryExpression exp)
+        {
+            return DealExpress(exp.Operand);
+        }
+        public static string DealConstantExpression(ConstantExpression exp)
+        {
+            object vaule = exp.Value;
+            string v_str = string.Empty;
+            if (vaule == null)
+            {
+                return "NULL";
+            }
+            if (vaule is string)
+            {
+                v_str = string.Format("'{0}'", vaule.ToString());
+            }
+            else if (vaule is DateTime)
+            {
+                DateTime time = (DateTime)vaule;
+                v_str = string.Format("'{0}'", time.ToString("yyyy-MM-dd HH:mm:ss"));
+            }
+            else
+            {
+                v_str = vaule.ToString();
+            }
+            return v_str;
+        }
+        public static string DealBinaryExpression(BinaryExpression exp)
+        {
+
+            string left = DealExpress(exp.Left);
+            string oper = GetOperStr(exp.NodeType);
+            string right = DealExpress(exp.Right);
+            if (right == "NULL")
+            {
+                if (oper == "=")
+                {
+                    oper = " is ";
+                }
+                else
+                {
+                    oper = " is not ";
+                }
+            }
+            return left + oper + right;
+        }
+        public static string DealMemberExpression(MemberExpression exp)
+        {
+            return exp.Member.Name;
+        }
+        public static string GetOperStr(ExpressionType e_type)
+        {
+            switch (e_type)
+            {
+                case ExpressionType.OrElse: return " OR ";
+                case ExpressionType.Or: return "|";
+                case ExpressionType.AndAlso: return " AND ";
+                case ExpressionType.And: return "&";
+                case ExpressionType.GreaterThan: return ">";
+                case ExpressionType.GreaterThanOrEqual: return ">=";
+                case ExpressionType.LessThan: return "<";
+                case ExpressionType.LessThanOrEqual: return "<=";
+                case ExpressionType.NotEqual: return "<>";
+                case ExpressionType.Add: return "+";
+                case ExpressionType.Subtract: return "-";
+                case ExpressionType.Multiply: return "*";
+                case ExpressionType.Divide: return "/";
+                case ExpressionType.Modulo: return "%";
+                case ExpressionType.Equal: return "=";
+            }
+            return "";
+        }
+
         #endregion
 
         #endregion
+
+
     }
 }

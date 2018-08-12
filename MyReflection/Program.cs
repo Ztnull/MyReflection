@@ -200,12 +200,12 @@ namespace MyReflection
                 {
 
                     SqlServerHelper sql = new SqlServerHelper();
-                    var list = sql.GetList<Model.Book>(" ID>100 ");
+                    var list = sql.GetList<Model.Book>(p => p.Id==5000);
 
                     foreach (var item in list)
                     {
                         Console.WriteLine(item.Id + "***" + item.ISBN + "***" + item.PublishDate + "***" + item.PublisherId + "***" + item.Title + "***" + item.TOC + "***" + item.UnitPrice + "***" + item.WordsCount);
-                       
+
                     }
 
                     Console.WriteLine(list.Count());
